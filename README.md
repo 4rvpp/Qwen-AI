@@ -1,23 +1,102 @@
 # Qwen Live Dictation
 
-Click **Start listening** once. After the model is ready, speak continuously.
-Text previews appear while recording remains active. Pause briefly to finalize
-a phrase; press **Stop** when you want to finish the session.
+This project types speech into an editable browser text box using a local
+Qwen3-ASR model. Click **Start listening** once, speak, and pause briefly between
+phrases. The current phrase is updated while recording remains active. Click
+**Stop** when you want to finish; the last phrase is processed before editing
+is enabled. No API key is needed.
 
-## Start
+## Set up on this computer
+
+The project is already installed at
+`C:\Users\arifi\Documents\Codex\2026-09-30\help\outputs\qwen-voice-typing`.
+Open **PowerShell**, then run:
+
+```powershell
+cd "C:\Users\arifi\Documents\Codex\2026-09-30\help\outputs\qwen-voice-typing"
+.\run.ps1
+```
+
+If PowerShell prevents scripts from running, use the equivalent Python command:
 
 ```powershell
 .\.venv\Scripts\python.exe app.py
 ```
 
-Open http://127.0.0.1:7861 in Chrome or Edge and allow microphone access.
-The previous record/stop app can remain on port 7860 while you copy its text.
-Stop its Python process when no longer needed to free memory. The new process
-loads its own model once and reuses it across listening sessions.
+Leave the PowerShell window open while using the app. Open
+http://127.0.0.1:7861 in Chrome or Edge. Click **Start listening**, allow that
+page to use the microphone when the browser asks, wait for **Listening**, and
+then speak. Click **Stop** to finish. Use **Copy text** or **Save .txt** before
+closing or refreshing the page. Press **Ctrl+C** in PowerShell to stop the server.
 
-For a fresh installation, run `install.ps1` then `run.ps1`. Manual installation
-instructions are in RECORD_MODE.md. Use the current requirements.txt. The ZIP
-excludes Python, the virtual environment, and the model cache.
+The old record/stop app can remain open on port 7860 while you copy its text.
+The live app uses a separate Python process and loads another copy of the model,
+so close the old app when finished to free memory. Text from the old tab does
+not automatically move to the new tab; copy and paste it if you want to keep it.
+
+## Set up from the ZIP on another Windows computer
+
+1. Extract `qwen-voice-typing.zip` to a folder you can write to. Open PowerShell
+   in that extracted folder. The ZIP contains source files, not Python packages
+   or model weights.
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+   from its official instructions if `uv --version` does not work. You need an
+   internet connection for the initial setup and model download.
+3. In the extracted project folder, run:
+
+   ```powershell
+   .\install.ps1
+   .\run.ps1
+   ```
+
+   `install.ps1` installs Python 3.12, creates a private `.venv` environment,
+   and installs `requirements.txt`. It can download several hundred megabytes
+   of dependencies. `run.ps1` starts the live app on port 7861.
+
+4. Open http://127.0.0.1:7861 and allow microphone access. The first use also
+   downloads the Qwen3-ASR-0.6B model, whose weight file is about 1.88 GB, then
+   loads it into memory. Later listening sessions in the same running server
+   reuse that in-memory model. A restart reloads it from the local cache.
+
+If PowerShell blocks `.ps1` scripts, run these commands directly in the project
+folder without changing the system execution policy:
+
+```powershell
+$env:UV_CACHE_DIR = "$PWD\.cache\uv"
+$env:UV_PYTHON_INSTALL_DIR = "$PWD\.cache\python"
+uv python install 3.12
+uv venv --python 3.12 .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.\.venv\Scripts\python.exe app.py
+```
+
+If port 7861 is already in use, close the previous live server with **Ctrl+C**.
+If you intentionally need another port, set `$env:QWEN_PORT = '7862'` before
+starting Python and open the matching localhost URL.
+
+## Check that setup worked
+
+From the project folder, check the installed packages and run the tests:
+
+```powershell
+uv pip check --python .venv\Scripts\python.exe
+.\.venv\Scripts\python.exe -m unittest -v
+```
+
+The package check should report that all installed packages are compatible.
+The tests should report **9 tests, OK**. They check audio buffering and the
+local WebSocket behavior; they do not measure recognition speed or microphone
+quality. To check Qwen with its public sample:
+
+```powershell
+.\.venv\Scripts\python.exe -u check_model.py
+```
+
+That command can take a long time on CPU. For a first microphone test, say one
+short sentence, wait for text, then click Stop. A browser permission error means
+the browser or Windows microphone access must be enabled. A Qwen download error
+usually means the model files could not be fetched; confirm internet access and
+retry `check_model.py`.
 
 ## What live means here
 
@@ -27,9 +106,11 @@ replaces the previous version of that phrase instead of duplicating words.
 This is not Qwen's native vLLM streaming API.
 
 Two seconds is a scheduling interval, not a response-time guarantee. Actual
-delay includes inference and any backlog. CPU processing may be slower than
-speech. This removes the need to press Stop after every sentence, but does
-not guarantee immediate word-by-word output.
+delay includes inference and any backlog. On the CPU used for this project's
+test, the first previews took about **31–37 seconds**; a longer phrase took
+about **250 seconds**. This removes the need to press Stop after every sentence,
+but this computer does not deliver immediate word-by-word output. You would
+need a faster inference setup to reduce that delay substantially.
 
 ## Flow
 
