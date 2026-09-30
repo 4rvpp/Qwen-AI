@@ -116,8 +116,9 @@ def create_app(load_model=None, recognize=None):
 
 def main():
     import uvicorn
+    from engine import ATTN_IMPLEMENTATION, DEVICE
     port = int(os.getenv('QWEN_PORT', '7861'))
-    print(f'Live dictation: http://127.0.0.1:{port}')
+    print(f'Live dictation ({DEVICE}; attention={ATTN_IMPLEMENTATION}): http://127.0.0.1:{port}')
     uvicorn.run(create_app(), host='127.0.0.1', port=port, ws_max_size=400000)
 
 if __name__ == '__main__':

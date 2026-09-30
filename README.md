@@ -74,6 +74,53 @@ If port 7861 is already in use, close the previous live server with **Ctrl+C**.
 If you intentionally need another port, set `$env:QWEN_PORT = '7862'` before
 starting Python and open the matching localhost URL.
 
+## Use an NVIDIA GPU
+
+The app automatically uses `cuda:0` when PyTorch can see an NVIDIA CUDA GPU;
+otherwise it uses CPU. The normal installer can install a CPU-only PyTorch
+build, so run the matching setup once after installing the application.
+
+### Windows
+
+```powershell
+.\install-gpu.ps1
+```
+
+### Linux
+
+```bash
+chmod +x install-gpu.sh
+./install-gpu.sh
+```
+
+Both scripts install the current CUDA 12.8 PyTorch wheel, required for NVIDIA Blackwell
+GPUs such as the RTX 5070 Laptop (`sm_120`), and verify that the operating
+system can access the GPU. Restart the app afterward; its first line must say
+`Live dictation (cuda:0)`. If the script reports CUDA unavailable, install or
+update the NVIDIA driver and rerun it. The full CUDA Toolkit is not required.
+To force CPU mode, set `QWEN_DEVICE=cpu` before starting the app.
+
+If PyTorch warns that it supports only up to `sm_90`, the old wheel is still
+active. Stop every running app process, rerun the matching GPU installer, then
+verify the exact environment used by the app:
+
+```bash
+.venv/bin/python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_arch_list())"
+```
+
+The output must show CUDA `12.8` (or newer) and include `sm_120` before you
+start `app.py`.
+
+Run `.venv/bin/python check_gpu.py` before the app. It verifies a BF16 CUDA
+matrix multiply independently of Qwen. If it passes but Qwen later crashes,
+the failure is within Qwen/Transformers rather than the NVIDIA driver or the
+PyTorch CUDA installation.
+
+On Blackwell laptop GPUs the app defaults to Qwen's portable `eager` attention
+backend, avoiding the CUDA SDPA path that can crash during the first generated
+token. Startup reports `attention=eager`; leave that setting in place unless
+you have separately verified that `QWEN_ATTN_IMPLEMENTATION=sdpa` is stable.
+
 ## Check that setup worked
 
 From the project folder, check the installed packages and run the tests:
