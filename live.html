@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Qwen Live Dictation</title>
+<style>
+body{font:17px system-ui,sans-serif;background:#f3f6f8;color:#183034;margin:0;padding:40px 20px}main{max-width:850px;margin:auto}h1{font-size:36px;letter-spacing:-1px;margin-bottom:8px}p{line-height:1.6;color:#52676b}.panel{background:white;border:1px solid #d8e3e6;border-radius:18px;padding:26px;margin-top:22px}.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center}button,select{font:inherit;border-radius:9px;padding:11px 17px;border:1px solid #bacccd;background:white}button{cursor:pointer}button.primary{background:#14675e;color:white;border-color:#14675e}button:disabled{opacity:.5;cursor:default}textarea{box-sizing:border-box;width:100%;min-height:330px;padding:18px;border:1px solid #c8d6d8;border-radius:10px;font:19px/1.6 system-ui;margin-top:10px;resize:vertical}#status{min-height:26px;margin-top:18px;font-weight:600;white-space:pre-wrap}small{color:#52676b}label{font-weight:600}.badge{color:#14675e;text-transform:uppercase;font-size:12px;letter-spacing:2px}
+</style>
+<main><span class="badge">Local speech recognition</span><h1>Speak. Watch your text appear.</h1><p>Press Start once and keep talking. Qwen updates the current phrase while you speak and finalizes it when you pause. CPU processing can delay updates.</p>
+<div class="panel"><div class="controls"><label for="language">Language</label><select id="language"><option>Auto</option><option>English</option><option>Malay</option><option>Indonesian</option><option>Chinese</option><option>Arabic</option></select><button class="primary" id="start">Start listening</button><button id="stop" disabled>Stop</button></div><div id="status" role="status" aria-live="polite">Ready. Your browser will ask for microphone access.</div></div>
+<div class="panel"><label for="text">Your text</label><textarea id="text" placeholder="Your words will appear here. You can edit them after stopping."></textarea><div class="controls"><button id="copy">Copy text</button><button id="save">Save .txt</button></div><p><small>Current phrases can change as Qwen hears more audio. Text and audio are not saved by the server. Copy or save your text before refreshing.</small></p></div></main>
+<script>
+const $=id=>document.getElementById(id);
+let socket,context,stream,source,node,silent,flushDone,active=false,stopping=false,base='',phrases=new Map();
+function status(text){$('status').textContent=text;}
+function render(){const text=[...phrases.entries()].sort((a,b)=>a[0]-b[0]).map(([,v])=>v.text).filter(Boolean).join('\n');$('text').value=[base,text].filter(Boolean).join('\n');$('text').scrollTop=$('text').scrollHeight;}
+async function releaseMic(){stream?.getTracks().forEach(track=>track.stop());stream=null;source?.disconnect();node?.disconnect();silent?.disconnect();const closing=context;context=null;source=null;node=null;if(closing&&closing.state!=='closed')await closing.close();}
+function unlock(){active=false;stopping=false;$('start').disabled=false;$('stop').disabled=true;$('language').disabled=false;$('text').readOnly=false;}
+async function stopCapture(){
+  if(stopping)return;stopping=true;$('stop').disabled=true;
+  if(!node){active=false;socket?.close();await releaseMic();unlock();status('Preparation cancelled.');return;}
+  await new Promise(resolve=>{flushDone=resolve;node.port.postMessage('stop');setTimeout(resolve,1000);});flushDone=null;
+  await releaseMic();if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'stop'}));
+}
+$('start').onclick=async()=>{
+  active=true;stopping=false;$('start').disabled=true;$('language').disabled=true;$('text').readOnly=true;
+  base=$('text').value.trimEnd();phrases=new Map();status('Requesting microphone access...');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true},video:false});
+    context=new AudioContext();await context.resume();await context.audioWorklet.addModule('/capture.js');
+    socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/listen`);
+    const thisSocket=socket;
+    $('stop').disabled=false;
+    socket.onopen=()=>{if(active)thisSocket.send(JSON.stringify({rate:context.sampleRate,language:$('language').value}));};
+    socket.onmessage=async event=>{
+      if(thisSocket!==socket)return;
+      const message=JSON.parse(event.data);
+      if(message.type==='ready'){
+        if(!active||stopping)return;
+        source=context.createMediaStreamSource(stream);node=new AudioWorkletNode(context,'capture');silent=context.createGain();silent.gain.value=0;
+        node.port.onmessage=event=>{
+          if(event.data?.stopped){flushDone?.();return;}
+          if(thisSocket.readyState===WebSocket.OPEN){
+            if(thisSocket.bufferedAmount>2_000_000){status('Connection too slow. Stopping capture.');stopCapture();return;}
+            thisSocket.send(event.data);
+          }
+        };
+        source.connect(node);node.connect(silent);silent.connect(context.destination);status('Listening. Speak naturally; pause briefly between phrases.');
+      }else if(message.type==='text'){
+        const previous=phrases.get(message.id);
+        if(!previous?.final){phrases.set(message.id,{text:message.text,final:message.final});render();}
+        status(`${stopping?'Finishing':'Listening'} · ${message.final?'Final phrase':'Live preview'} · processing ${message.seconds}s · waiting audio ${message.backlog}s`);
+      }else if(message.type==='status'){status(message.message);
+      }else if(message.type==='stop_capture'){status(message.message);await stopCapture();
+      }else if(message.type==='done'){status('Finished. You can edit, copy, save, or start again.');await releaseMic();unlock();
+      }else if(message.type==='error'){status(message.message);await releaseMic();unlock();thisSocket.close();}
+    };
+    socket.onerror=()=>{if(thisSocket===socket)status('Connection failed. Make sure the Python app is running.');};
+    socket.onclose=async()=>{if(thisSocket!==socket)return;if(active)status('Connection closed. Existing text is preserved; the last preview may be unfinished.');await releaseMic();unlock();};
+  }catch(error){status(error.message);await releaseMic();unlock();socket?.close();}
+};
+$('stop').onclick=async()=>{status('Stopping the microphone and finishing pending speech...');await stopCapture();};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('text').value);}catch{status('Copy failed. Select the text and press Ctrl+C.');}};
+$('save').onclick=()=>{const url=URL.createObjectURL(new Blob([$('text').value],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='dictation.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+window.addEventListener('beforeunload',event=>{if($('text').value||active){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{stream?.getTracks().forEach(t=>t.stop());socket?.close();});
+</script></html>
